@@ -1,9 +1,9 @@
 import numpy as np
 import cv2
+# Import everything needed to edit/save/watch video clips
+from moviepy import editor
+import moviepy
 
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
-
-import imageio
 
 def region_selection(image):
     """
@@ -18,27 +18,21 @@ def region_selection(image):
     if len(image.shape) > 2:
         channel_count = image.shape[2]
         ignore_mask_color = (255,) * channel_count
-        polygon_color = (0, 255, 0)  # Green for visualization
+    # our image only has one channel so it will go under "else"
     else:
+        # color of the mask polygon (white)
         ignore_mask_color = 255
-        polygon_color = 255  # White for single channel
     # creating a polygon to focus only on the road in the picture
     # we have created this polygon in accordance to how the camera was placed
     rows, cols = image.shape[:2]
-    bottom_left = [cols * 0.001, rows * 0.99]
-    top_left = [cols * 0.001, rows * 0.6]
+    bottom_left = [cols * 0.1, rows * 0.95]
+    top_left = [cols * 0.4, rows * 0.6]
     bottom_right = [cols * 0.9, rows * 0.95]
     top_right = [cols * 0.6, rows * 0.6]
     vertices = np.array([[bottom_left, top_left, top_right, bottom_right]], dtype=np.int32)
     # filling the polygon with white color and generating the final mask
     cv2.fillPoly(mask, vertices, ignore_mask_color)
     # performing Bitwise AND on the input image and mask to get only the edges on the road
-    # overlay_image = image.copy()
-    # cv2.polylines(overlay_image, [vertices], isClosed=True, color=polygon_color, thickness=2)
-    # cv2.imshow("Polygon Overlay", overlay_image)
-    # cv2.waitKey(0)  # Wait for a key press to close the window
-    # cv2.destroyAllWindows()
-
     masked_image = cv2.bitwise_and(image, mask)
     return masked_image
 
@@ -56,9 +50,9 @@ def hough_transform(image):
     # Only lines that are greater than threshold will be returned.
     threshold = 20
     # Line segments shorter than that are rejected.
-    minLineLength = 50
+    minLineLength = 20
     # Maximum allowed gap between points on the same line to link them
-    maxLineGap = 30
+    maxLineGap = 500
     # function returns an array containing dimensions of straight lines
     # appearing in the input image
     return cv2.HoughLinesP(image, rho=rho, theta=theta, threshold=threshold,
@@ -132,26 +126,20 @@ def lane_lines(image, lines):
     return left_line, right_line
 
 
-def draw_lane_lines(image, lines, color=[255, 0, 0], thickness=2):
+def draw_lane_lines(image, lines, color=[255, 0, 0], thickness=12):
     """
-    Draw all detected lines onto the input image.
+    Draw lines onto the input image.
         Parameters:
-            image: The input image.
-            lines: The detected lines from Hough Transform.
-            color: Line color (default is red).
-            thickness: Line thickness (default is 2).
+            image: The input test image (video frame in our case).
+            lines: The output lines from Hough Transform.
+            color (Default = red): Line color.
+            thickness (Default = 12): Line thickness.
     """
     line_image = np.zeros_like(image)
-
-    if lines is not None:
-        for line in lines:
-            # Each 'line' is a nested array; extract it properly
-            x1, y1, x2, y2 = line[0]
-            cv2.line(line_image, (x1, y1), (x2, y2), color, thickness)
-
-    # Combine with the original image
+    for line in lines:
+        if line is not None:
+            cv2.line(line_image, *line, color, thickness)
     return cv2.addWeighted(image, 1.0, line_image, 1.0, 0.0)
-
 
 
 def frame_processor(image):
@@ -197,7 +185,7 @@ def process_video(test_video, output_video):
         output_video: location where output video file is to be saved
     """
     # read the video file using VideoFileClip without audio
-    input_video = VideoFileClip(test_video, audio=False)
+    input_video = editor.VideoFileClip(test_video, audio=False)
     # apply the function "frame_processor" to each frame of the video
     # will give more detail about "frame_processor" in further steps
     # "processed" stores the output video
