@@ -48,7 +48,19 @@ def hough_transform(image):
     threshold = 20
     minLineLength = 50
     maxLineGap = 200
-    return cv2.HoughLinesP(image, rho, theta, threshold, minLineLength=minLineLength, maxLineGap=maxLineGap)
+
+    lines = cv2.HoughLinesP(image, rho, theta, threshold, minLineLength=minLineLength, maxLineGap=maxLineGap)
+
+    # Debugging: Draw raw lines on a blank image
+    debug_image = np.zeros_like(image)
+    if lines is not None:
+        for line in lines:
+            for x1, y1, x2, y2 in line:
+                cv2.line(debug_image, (x1, y1), (x2, y2), (255, 0, 0), 2)
+    cv2.imshow("Hough Transform - Raw Lines", debug_image)
+    cv2.waitKey(1)
+
+    return lines
 
 
 def categorize_lines(lines, width):
@@ -64,15 +76,16 @@ def categorize_lines(lines, width):
             intercept = y1 - slope * x1
 
             if slope < 0:  # Negative slope: left-side lanes
-                if x1 < width * 0.25:  # Outer left
+                if x1 < width * 0.3:  # Outer left
                     left_outer.append((slope, intercept))
                 elif x1 < width * 0.5:  # Inner left
                     left_inner.append((slope, intercept))
             else:  # Positive slope: right-side lanes
-                if x1 > width * 0.75:  # Outer right
+                if x1 > width * 0.7:  # Outer right
                     right_outer.append((slope, intercept))
                 elif x1 > width * 0.5:  # Inner right
                     right_inner.append((slope, intercept))
+
     return left_outer, left_inner, right_inner, right_outer
 
 
@@ -85,10 +98,27 @@ def average_lines(lines):
     slope, intercept = np.mean(lines, axis=0)
     return slope, intercept
 
+def interpolate_missing_lines(image, categorized_lines):
+    """
+    Handle missing lines by interpolation or estimation.
+    """
+    height, width = image.shape[:2]
+    interpolated_lines = []
+    for lines in categorized_lines:
+        avg_line = average_lines(lines)
+        if avg_line is None:
+            # Default slope and intercept if missing
+            slope = -0.5 if len(interpolated_lines) < 2 else 0.5
+            intercept = height if slope < 0 else 0
+            avg_line = (slope, intercept)
+        interpolated_lines.append(avg_line)
+    return interpolated_lines
+
 
 def pixel_coordinates(y1, y2, line):
     """
     Convert slope-intercept form to pixel coordinates.
+    Ensure coordinates are within the frame boundaries.
     """
     if line is None:
         return None
@@ -98,7 +128,8 @@ def pixel_coordinates(y1, y2, line):
         x2 = int((y2 - intercept) / slope)
     except ZeroDivisionError:
         return None
-    return (x1, y1), (x2, y2)
+    # Ensure coordinates are within image bounds
+    return (max(0, min(x1, 1920)), y1), (max(0, min(x2, 1920)), y2)
 
 
 def lane_lines(image, lines):
@@ -109,20 +140,24 @@ def lane_lines(image, lines):
     y1 = height
     y2 = int(height * 0.6)
 
-    left_outer, left_inner, right_inner, right_outer = categorize_lines(lines, width)
-
-    left_outer_avg = average_lines(left_outer)
-    left_inner_avg = average_lines(left_inner)
-    right_inner_avg = average_lines(right_inner)
-    right_outer_avg = average_lines(right_outer)
+    categorized_lines = categorize_lines(lines, width)
+    interpolated_lines = interpolate_missing_lines(image, categorized_lines)
 
     return [
-        pixel_coordinates(y1, y2, left_outer_avg),
-        pixel_coordinates(y1, y2, left_inner_avg),
-        pixel_coordinates(y1, y2, right_inner_avg),
-        pixel_coordinates(y1, y2, right_outer_avg),
+        pixel_coordinates(y1, y2, interpolated_lines[0]),  # Left outer
+        pixel_coordinates(y1, y2, interpolated_lines[1]),  # Left inner
+        pixel_coordinates(y1, y2, interpolated_lines[2]),  # Right inner
+        pixel_coordinates(y1, y2, interpolated_lines[3]),  # Right outer
     ]
 
+def debug_frame(image, lines):
+    """
+    Visualize the frame with detected lanes before combining into the final video.
+    """
+    debug_image = draw_lane_lines(image, lines)
+    cv2.imshow("Debug Frame with Lanes", debug_image)
+    cv2.waitKey(1)  # Adjust to 1 for real-time debugging
+    return debug_image
 
 def draw_lane_lines(image, lines):
     """
@@ -131,21 +166,24 @@ def draw_lane_lines(image, lines):
     line_image = np.zeros_like(image)
     for line in lines:
         if line is not None:
-            cv2.line(line_image, *line, (0, 255, 0), 10)
+            cv2.line(line_image, line[0], line[1], (0, 255, 0), 10)  # Green color with thickness 10
+    # Overlay the lines on the original image
     return cv2.addWeighted(image, 1.0, line_image, 1.0, 0.0)
 
 
 def frame_processor(image):
     """
-    Process each frame to detect lane lines.
+    Process each frame to detect and draw lane lines.
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
     edges = cv2.Canny(blur, 50, 150)
     roi = region_selection(edges)
     lines = hough_transform(roi)
+
     if lines is not None:
         lanes = lane_lines(image, lines)
+        debug_frame(image, lanes)  # Optional: Debug visualization
         return draw_lane_lines(image, lanes)
     return image
 
