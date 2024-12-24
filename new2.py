@@ -18,22 +18,15 @@ def region_selection(image):
         polygon_color = 255  # White for single channel
 
     rows, cols = image.shape[:2]
-    bottom_left = [cols * 0.001, rows * 0.85]
-    top_left = [cols * 0.25, rows * 0.2]
-
-    bottom_right = [cols * 0.45, rows * 0.99]
-    top_right = [cols * 0.4, rows * 0.2]
+    bottom_left = [cols * 0.05, rows * 0.9]  # Adjusted for wider bottom
+    top_left = [cols * 0.25, rows * 0.45]  # Adjusted for wider top
+    bottom_right = [cols * 0.95, rows * 0.9]  # Adjusted for wider bottom
+    top_right = [cols * 0.75, rows * 0.45]  # Adjusted for wider top
 
     vertices = np.array([[bottom_left, top_left, top_right, bottom_right]], dtype=np.int32)
     # filling the polygon with white color and generating the final mask
     cv2.fillPoly(mask, vertices, ignore_mask_color)
     # performing Bitwise AND on the input image and mask to get only the edges on the road
-
-    # overlay_image = image.copy()
-    # cv2.polylines(overlay_image, [vertices], isClosed=True, color=polygon_color, thickness=2)
-    # cv2.imshow("Polygon Overlay", overlay_image)
-    # cv2.waitKey(0)  # Wait for a key press to close the window
-    # cv2.destroyAllWindows()
 
     masked_image = cv2.bitwise_and(image, mask)
     return masked_image
@@ -43,11 +36,11 @@ def hough_transform(image):
     """
     Apply Hough Transform to detect lines.
     """
-    rho = 1
+    rho = 1  # Reduced for more precision
     theta = np.pi / 180
-    threshold = 20
-    minLineLength = 50
-    maxLineGap = 200
+    threshold = 30  # Increased threshold for more prominent lines
+    minLineLength = 20  # Reduced to capture shorter lines
+    maxLineGap = 20  # Reduced to connect close line segments
     return cv2.HoughLinesP(image, rho, theta, threshold, minLineLength=minLineLength, maxLineGap=maxLineGap)
 
 
@@ -63,16 +56,17 @@ def categorize_lines(lines, width):
             slope = (y2 - y1) / (x2 - x1)
             intercept = y1 - slope * x1
 
-            if slope < 0:  # Negative slope: left-side lanes
-                if x1 < width * 0.25:  # Outer left
+            if slope < -0.2:  # Left-side lanes, adjusted slope threshold
+                if x1 < width * 0.45:  # Adjusted outer threshold
                     left_outer.append((slope, intercept))
-                elif x1 < width * 0.5:  # Inner left
+                else:  # Inner left
                     left_inner.append((slope, intercept))
-            else:  # Positive slope: right-side lanes
-                if x1 > width * 0.75:  # Outer right
+            elif slope > 0.2:  # Right-side lanes, adjusted slope threshold
+                if x1 > width * 0.55:  # Adjusted outer threshold
                     right_outer.append((slope, intercept))
-                elif x1 > width * 0.5:  # Inner right
+                else:  # Inner right
                     right_inner.append((slope, intercept))
+
     return left_outer, left_inner, right_inner, right_outer
 
 
@@ -93,11 +87,18 @@ def pixel_coordinates(y1, y2, line):
     if line is None:
         return None
     slope, intercept = line
-    try:
+
+    # Avoid division by zero in cases where slope is close to zero
+    if abs(slope) < 1e-6:  # Small threshold to consider slope as zero
+        # Handle nearly horizontal lines by setting x to an arbitrary large value
+        x1 = int(1e6)  # A large value
+        x2 = int(-1e6)  # A large negative value
+        y1 = int(intercept)  # y-coordinate remains the same
+        y2 = int(intercept)  # y-coordinate remains the same
+    else:
         x1 = int((y1 - intercept) / slope)
         x2 = int((y2 - intercept) / slope)
-    except ZeroDivisionError:
-        return None
+
     return (x1, y1), (x2, y2)
 
 
@@ -106,8 +107,8 @@ def lane_lines(image, lines):
     Generate four lane lines from detected lines.
     """
     height, width = image.shape[:2]
-    y1 = height
-    y2 = int(height * 0.6)
+    y1 = height  # Bottom of the image
+    y2 = int(height * 0.55)  # Adjusted y2 to be slightly higher
 
     left_outer, left_inner, right_inner, right_outer = categorize_lines(lines, width)
 
@@ -124,14 +125,14 @@ def lane_lines(image, lines):
     ]
 
 
-def draw_lane_lines(image, lines):
+def draw_lane_lines(image, lines, color=(0, 255, 0), thickness=10):
     """
     Draw the detected lane lines on the image.
     """
     line_image = np.zeros_like(image)
     for line in lines:
         if line is not None:
-            cv2.line(line_image, *line, (0, 255, 0), 10)
+            cv2.line(line_image, *line, color, thickness)
     return cv2.addWeighted(image, 1.0, line_image, 1.0, 0.0)
 
 
@@ -160,4 +161,4 @@ def process_video(input_path, output_path):
 
 
 # Run the function
-process_video("17.MOV", "output.mp4")
+process_video("17.MOV", "output2.mp4")
